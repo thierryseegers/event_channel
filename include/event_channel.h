@@ -267,7 +267,8 @@ public:
 			};
 	}
 
-	//! Subscribe an object instance and a member function as an event handler.
+	//!\brief Subscribe an object instance and a member function as an event handler.
+	//!
 	//! The \c weak_ptr<> is saved and invoked only if it can be locked.
 	template<typename T, typename R, typename... Args>
 	void subscribe(std::shared_ptr<T> const& p, R (T::*f)(Args...))
@@ -284,7 +285,8 @@ public:
 			};
 	}
 
-	//! Subscribe a \c Callable as an event handler.
+	//!\brief Subscribe a \c Callable as an event handler.
+	//!
 	//!\return A tag to use with its \c unsubcribe counterpart.
 	template<typename F, typename... Args>
 	handler_tag_t subscribe(F f)
