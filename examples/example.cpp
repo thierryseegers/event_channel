@@ -34,10 +34,6 @@ public:
 
 int main()
 {
-    map<int, string> mis;
-    mis[11] = "apple";
-    mis[22] = "banana";
-
 	event_channel::channel<> ec;
 
     // Subscribe a global function.
