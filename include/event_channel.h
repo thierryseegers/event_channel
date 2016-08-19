@@ -102,13 +102,13 @@ class channel
 	// Since the type returned by std::make_tuple<Args...> may not be exactly std::tuple<Args...>,
 	// we use this type alias to ensure we're using the same type everywhere.
 	template<typename... Args>
-	using tuple_type_t = typename std::result_of<decltype(&std::make_tuple<Args...>)(Args...)>::type;
+	using make_tuple_type_t = typename std::result_of<decltype(&std::make_tuple<Args...>)(Args...)>::type;
 
 	// Convenience function to get a type_index out of a \ref tuple_type_t<Args...>.
 	template<typename... Args>
 	static auto tuple_type_index()
 	{
-		return std::type_index(typeid(tuple_type_t<Args...>));
+		return std::type_index(typeid(make_tuple_type_t<Args...>));
 	}
 
 	// Convenience function to invoke a \c Callable with arguments packaged in a \c std::tuple<>.
@@ -250,7 +250,7 @@ public:
 		dispatcher_pending_[tuple_type_index<Args...>()][make_tag(f)] =
 			[f](const void* params)
 			{
-				invoke(f, *static_cast<const tuple_type_t<Args...>*>(params), std::index_sequence_for<Args...>{});
+				invoke(f, *static_cast<const make_tuple_type_t<Args...>*>(params), std::index_sequence_for<Args...>{});
 			};
 	}
 
@@ -263,7 +263,7 @@ public:
 		dispatcher_pending_[tuple_type_index<Args...>()][make_tag(p, f)] =
 			[p, f](const void* params)
 			{
-				invoke(p, f, *static_cast<const tuple_type_t<Args...>*>(params), std::index_sequence_for<Args...>{});
+				invoke(p, f, *static_cast<const make_tuple_type_t<Args...>*>(params), std::index_sequence_for<Args...>{});
 			};
 	}
 
@@ -280,7 +280,7 @@ public:
 			{
 				if(auto const p = w.lock())
 				{
-					invoke(p.get(), f, *static_cast<const tuple_type_t<Args...>*>(params), std::index_sequence_for<Args...>{});
+					invoke(p.get(), f, *static_cast<const make_tuple_type_t<Args...>*>(params), std::index_sequence_for<Args...>{});
 				}
 			};
 	}
@@ -296,7 +296,7 @@ public:
 		dispatcher_pending_[tuple_type_index<Args...>()][generic_handler_tagger_] =
 			[f](const void* params)
 			{
-				invoke(f, *static_cast<const tuple_type_t<Args...>*>(params), std::index_sequence_for<Args...>{});
+				invoke(f, *static_cast<const make_tuple_type_t<Args...>*>(params), std::index_sequence_for<Args...>{});
 			};
 		
 		return generic_handler_tagger_++;
