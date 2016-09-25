@@ -70,7 +70,7 @@ struct parallel
 
 			for(auto const& d : dispatcher.at(e.first))
 			{
-				waiters.push_back(std::async([=](){ d.second(e.second()); }));
+				waiters.push_back(std::async([&](){ d.second(e.second()); }));
 			}
 
 			for(auto& w : waiters)
