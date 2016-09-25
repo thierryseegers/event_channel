@@ -111,20 +111,19 @@ class channel
 		return std::type_index(typeid(tuple_type_t<Args...>));
 	}
 
+	template<class F, class Tuple, std::size_t... I>
+	static constexpr decltype(auto) apply(F&& f, Tuple&& t, std::index_sequence<I...>)
+	{
+		return std::invoke(std::forward<F>(f), std::get<I>(std::forward<Tuple>(t))...);
+	}
+
 	// Convenience function to invoke a \c Callable with arguments packaged in a \c std::tuple<>.
-	template<typename F, typename P, size_t... Is>
-	static void invoke(F&& f, P&& params, std::index_sequence<Is...> const&)
+	template <class F, class Tuple>
+	static constexpr decltype(auto) apply(F&& f, Tuple&& t)
 	{
-		std::forward<F>(f)(std::get<Is>(std::forward<P>(params))...);
+		return apply(std::forward<F>(f), std::forward<Tuple>(t), std::make_index_sequence<std::tuple_size<std::decay_t<Tuple>>::value>{});
 	}
-	
-	// Convenience function to invoke a member function with arguments packaged in a \c std::tuple<>.
-	template<typename O, typename F, typename P, size_t... Is>
-	static void invoke(O&& o, F&& f, P&& params, std::index_sequence<Is...> const&)
-	{
-		(o->*std::forward<F>(f))(std::get<Is>(std::forward<P>(params))...);
-	}
-	
+
 	// Convenience function to map a function to a \ref handler_tag_t.
 	template<typename R, typename... Args>
 	handler_tag_t make_tag(R (*f)(Args...))
@@ -176,6 +175,7 @@ public:
 		{
 			return;
 		}
+
 
 		run_t_ = std::thread([this]()
 			{
@@ -250,7 +250,7 @@ public:
 		dispatcher_pending_[tuple_type_index<Args...>()][make_tag(f)] =
 			[f](const void* params)
 			{
-				invoke(f, *static_cast<const tuple_type_t<Args...>*>(params), std::index_sequence_for<Args...>{});
+				apply(f, *static_cast<const tuple_type_t<Args...>*>(params));
 			};
 	}
 
@@ -263,7 +263,7 @@ public:
 		dispatcher_pending_[tuple_type_index<Args...>()][make_tag(p, f)] =
 			[p, f](const void* params)
 			{
-				invoke(p, f, *static_cast<const tuple_type_t<Args...>*>(params), std::index_sequence_for<Args...>{});
+				apply(f, std::tuple_cat(std::make_tuple(p), *static_cast<const tuple_type_t<Args...>*>(params)));
 			};
 	}
 
@@ -280,7 +280,7 @@ public:
 			{
 				if(auto const p = w.lock())
 				{
-					invoke(p.get(), f, *static_cast<const tuple_type_t<Args...>*>(params), std::index_sequence_for<Args...>{});
+					apply(f, std::tuple_cat(std::make_tuple(p), *static_cast<const tuple_type_t<Args...>*>(params)));
 				}
 			};
 	}
@@ -296,7 +296,7 @@ public:
 		dispatcher_pending_[tuple_type_index<Args...>()][generic_handler_tagger_] =
 			[f](const void* params)
 			{
-				invoke(f, *static_cast<const tuple_type_t<Args...>*>(params), std::index_sequence_for<Args...>{});
+				apply(f, *static_cast<const tuple_type_t<Args...>*>(params));
 			};
 		
 		return generic_handler_tagger_++;
