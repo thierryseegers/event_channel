@@ -201,9 +201,10 @@ public:
 					
 					// Move pending subscribers from \ref dispatcher_pending_ to \ref dispatcher_.
 					// This allows users to add more subscribers while we process events.
-					// If we didn't do that, subscribing would block while events are being processed since \ref dispatcher_ must remain intact while that happens.
+					// If we didn't do that, subscribing would block while events are processed since \ref dispatcher_ must remain intact while that happens.
+					// Mind you, as it is now, unsubscribing will still block while events are processed. To avoid this, we would need the equivalent of dispatcher_pending_ for removal.
+					std::unique_lock<std::mutex> lgd(dispatcher_m_, std::defer_lock);
 					{
-						std::unique_lock<std::mutex> lgd(dispatcher_m_, std::defer_lock);
 						std::unique_lock<std::mutex> lgdp(dispatcher_pending_m_, std::defer_lock);
 						std::lock(lgd, lgdp);
 						
