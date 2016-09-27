@@ -9,8 +9,16 @@ endif()
 
 add_executable(example example.cpp)
 
-set_target_properties(example PROPERTIES
-	CXX_STANDARD 14
-	CXX_STANDARD_REQUIRED ON)
+# Revisit when CMake supports C++17
+#set_target_properties(correctness PROPERTIES
+#    FOLDER "tests"
+#	CXX_STANDARD 14
+#	CXX_STANDARD_REQUIRED ON)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR
+   CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+	target_compile_options(example
+		PUBLIC -std=c++1z
+	)
+endif()
 
 target_link_libraries(example Threads::Threads)
