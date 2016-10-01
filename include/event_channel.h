@@ -31,8 +31,9 @@ typedef std::function<const void* ()> wrapped_event_t;					//!< Type of functor 
 typedef std::pair<event_tag_t, wrapped_event_t> tagged_wrapped_event_t;	//!< Type of the association of an event's type tag, and it's associated wrapper functor.
 typedef std::vector<tagged_wrapped_event_t> tagged_wrapped_events_t;	//!< Type of a set of events.
 
-typedef std::map<handler_tag_t, std::function<void (const void*)>> tagged_handlers_t;	//!< Type of handlers key'ed by their tags.
-typedef std::map<event_tag_t, tagged_handlers_t> dispatcher_t;							//!< Type of tagged handlers key'ed by event types.
+typedef std::function<void (const void*)> handler_t;			//!< Type of functor that wraps handlers.
+typedef std::map<handler_tag_t, handler_t> tagged_handlers_t;	//!< Type of handlers key'ed by their tags.
+typedef std::map<event_tag_t, tagged_handlers_t> dispatcher_t;	//!< Type of tagged handlers key'ed by event types.
 
 }
 
@@ -45,13 +46,13 @@ namespace dispatch_policy
 struct sequential
 {
 	//! Dispatching function.
-	static void dispatch(detail::tagged_wrapped_events_t const& events, detail::dispatcher_t const& dispatcher)
+	static void dispatch(detail::tagged_wrapped_events_t const& wrapped_events, detail::dispatcher_t const& dispatcher)
 	{
-		for(auto const& e : events)
+		for(auto const& wrapped_event : wrapped_events)
 		{
-			for(auto const& d : dispatcher.at(e.first))
+			for(auto const& tagged_handler : dispatcher.at(wrapped_event.first))
 			{
-				d.second(e.second());
+				tagged_handler.second(wrapped_event.second());
 			}
 		}
 	}
@@ -62,21 +63,17 @@ struct sequential
 struct parallel
 {
 	//! Dispatching function.
-	static void dispatch(detail::tagged_wrapped_events_t const& events, detail::dispatcher_t const& dispatcher)
+	static void dispatch(detail::tagged_wrapped_events_t const& wrapped_events, detail::dispatcher_t const& dispatcher)
 	{
-		for(auto const& e : events)
+		for(auto const& wrapped_event : wrapped_events)
 		{
 			std::vector<std::future<void>> waiters;
-
-			for(auto const& d : dispatcher.at(e.first))
+			for(auto const& tagged_handler : dispatcher.at(wrapped_event.first))
 			{
-				waiters.push_back(std::async([&](){ d.second(e.second()); }));
+				waiters.push_back(std::async([&](){ tagged_handler.second(wrapped_event.second()); }));
 			}
 
-			for(auto& w : waiters)
-			{
-				w.wait();
-			}
+			for_each(waiters.cbegin(), waiters.cend(), std::mem_fn(&std::future<void>::wait));
 		}
 	}
 };
