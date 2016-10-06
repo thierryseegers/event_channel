@@ -121,7 +121,7 @@ class channel
 	template <class F, class Tuple>
 	static constexpr decltype(auto) apply(F&& f, Tuple&& t)
 	{
-		return apply(std::forward<F>(f), std::forward<Tuple>(t), std::make_index_sequence<std::tuple_size<std::decay_t<Tuple>>::value>{});
+		return apply(std::forward<F>(f), std::forward<Tuple>(t), std::make_index_sequence<std::tuple_size_v<std::decay_t<Tuple>>>{});
 	}
 
 	// Convenience function to map a function to a \ref handler_tag_t.
