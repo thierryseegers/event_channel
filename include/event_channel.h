@@ -162,7 +162,7 @@ public:
 	//! Start dispatching events.
 	void start()
 	{
-		std::lock_guard<std::mutex> lg(events_m_);
+		std::lock_guard<std::mutex> lge(events_m_);
 		
 		if(!processing_)
 		{
@@ -173,7 +173,6 @@ public:
 			return;
 		}
 
-
 		run_t_ = std::thread([this]()
 			{
 				while(processing_)
@@ -182,8 +181,8 @@ public:
 					
 					// Wait until we are told to stop processing events or until we have events to process.
 					{
-						std::unique_lock<std::mutex> ul(events_m_);
-						events_cv_.wait(ul, [this]{ return !processing_ || !events_.empty(); });
+						std::unique_lock<std::mutex> ule(events_m_);
+						events_cv_.wait(ule, [this]{ return !processing_ || !events_.empty(); });
 					
 						if(!processing_)
 						{
@@ -200,10 +199,10 @@ public:
 					// This allows users to add more subscribers while we process events.
 					// If we didn't do that, subscribing would block while events are processed since \ref dispatcher_ must remain intact while that happens.
 					// Mind you, as it is now, unsubscribing will still block while events are processed. To avoid this, we would need the equivalent of dispatcher_pending_ for removal.
-					std::unique_lock<std::mutex> lgd(dispatcher_m_, std::defer_lock);
+					std::unique_lock<std::mutex> uld(dispatcher_m_, std::defer_lock);
 					{
-						std::unique_lock<std::mutex> lgdp(dispatcher_pending_m_, std::defer_lock);
-						std::lock(lgd, lgdp);
+						std::unique_lock<std::mutex> uldp(dispatcher_pending_m_, std::defer_lock);
+						std::lock(uld, uldp);
 						
 						for(auto& d : dispatcher_pending_)
 						{
@@ -225,7 +224,7 @@ public:
 	void stop()
 	{
 		{
-			std::lock_guard<std::mutex> lg(events_m_);
+			std::lock_guard<std::mutex> lge(events_m_);
 
 			if(IdlePolicy == idle_policy::drop_events)
 			{
@@ -233,9 +232,9 @@ public:
 			}
 
 			processing_ = false;
-			events_cv_.notify_one();
 		}
 
+		events_cv_.notify_one();
 		run_t_.join();
 	}
 	
@@ -243,7 +242,7 @@ public:
 	template<typename R, typename... Args>
 	void subscribe(R (*f)(Args...))
 	{
-		std::lock_guard<std::mutex> lg(dispatcher_pending_m_);
+		std::lock_guard<std::mutex> lge(dispatcher_pending_m_);
 		
 		dispatcher_pending_[tuple_type_index<Args...>()][make_tag(f)] =
 			[f](const void* params)
@@ -256,7 +255,7 @@ public:
 	template<typename T, typename R, typename... Args>
 	void subscribe(T* p, R (T::*f)(Args...))
 	{
-		std::lock_guard<std::mutex> lg(dispatcher_pending_m_);
+		std::lock_guard<std::mutex> lge(dispatcher_pending_m_);
 		
 		dispatcher_pending_[tuple_type_index<Args...>()][make_tag(p, f)] =
 			[p, f](const void* params)
@@ -271,7 +270,7 @@ public:
 	template<typename T, typename R, typename... Args>
 	void subscribe(std::shared_ptr<T> const& p, R (T::*f)(Args...))
 	{
-		std::lock_guard<std::mutex> lg(dispatcher_pending_m_);
+		std::lock_guard<std::mutex> lge(dispatcher_pending_m_);
 		
 		dispatcher_pending_[tuple_type_index<Args...>()][make_tag(p.get(), f)] =
 			[w = std::weak_ptr<T>(p), f](const void* params)
@@ -289,7 +288,7 @@ public:
 	template<typename F, typename... Args>
 	handler_tag_t subscribe(F f)
 	{
-		std::lock_guard<std::mutex> lg(dispatcher_pending_m_);
+		std::lock_guard<std::mutex> lge(dispatcher_pending_m_);
 		
 		dispatcher_pending_[tuple_type_index<Args...>()][generic_handler_tagger_] =
 			[f](const void* params)
@@ -304,9 +303,9 @@ public:
 	template<typename R, typename... Args>
 	void unsubscribe(R (*f)(Args...))
 	{
-		std::unique_lock<std::mutex> lgd(dispatcher_m_, std::defer_lock);
-		std::unique_lock<std::mutex> lgdp(dispatcher_pending_m_, std::defer_lock);
-		std::lock(lgd, lgdp);
+		std::unique_lock<std::mutex> uld(dispatcher_m_, std::defer_lock);
+		std::unique_lock<std::mutex> uldp(dispatcher_pending_m_, std::defer_lock);
+		std::lock(uld, uldp);
 
 		auto const t = tuple_type_index<Args...>();
 		detail::dispatcher_t::iterator i;
@@ -324,9 +323,9 @@ public:
 	template<typename T, typename R, typename... Args>
 	void unsubscribe(T* p, R (T::*f)(Args...))
 	{
-		std::unique_lock<std::mutex> lgd(dispatcher_m_, std::defer_lock);
-		std::unique_lock<std::mutex> lgdp(dispatcher_pending_m_, std::defer_lock);
-		std::lock(lgd, lgdp);
+		std::unique_lock<std::mutex> uld(dispatcher_m_, std::defer_lock);
+		std::unique_lock<std::mutex> uldp(dispatcher_pending_m_, std::defer_lock);
+		std::lock(uld, uldp);
 
 		auto const t = tuple_type_index<Args...>();
 		detail::dispatcher_t::iterator i;
@@ -344,9 +343,9 @@ public:
 	template<typename T, typename R, typename... Args>
 	void unsubscribe(std::shared_ptr<T> const& p, R (T::*f)(Args...))
 	{
-		std::unique_lock<std::mutex> lgd(dispatcher_m_, std::defer_lock);
-		std::unique_lock<std::mutex> lgdp(dispatcher_pending_m_, std::defer_lock);
-		std::lock(lgd, lgdp);
+		std::unique_lock<std::mutex> uld(dispatcher_m_, std::defer_lock);
+		std::unique_lock<std::mutex> uldp(dispatcher_pending_m_, std::defer_lock);
+		std::lock(uld, uldp);
 
 		auto const t = tuple_type_index<Args...>();
 		detail::dispatcher_t::iterator i;
@@ -363,9 +362,9 @@ public:
 	//! Unsubscribe a previously subscribed \c Callable.
 	void unsubscribe(handler_tag_t tag)
 	{
-		std::unique_lock<std::mutex> lgd(dispatcher_m_, std::defer_lock);
-		std::unique_lock<std::mutex> lgdp(dispatcher_pending_m_, std::defer_lock);
-		std::lock(lgd, lgdp);
+		std::unique_lock<std::mutex> uld(dispatcher_m_, std::defer_lock);
+		std::unique_lock<std::mutex> uldp(dispatcher_pending_m_, std::defer_lock);
+		std::lock(uld, uldp);
 
 		for(auto& d : dispatcher_)
 		{
@@ -381,11 +380,12 @@ public:
 	template<typename... Args>
 	void send(Args&&... args)
 	{
-		std::lock_guard<std::mutex> lg(events_m_);
+		std::unique_lock<std::mutex> ule(events_m_);
 		
 		if(processing_ || IdlePolicy == idle_policy::keep_events)
 		{
 			events_.push_back(std::make_pair(tuple_type_index<Args...>(), [e = std::make_tuple(std::forward<Args>(args)...)]{ return &e; }));
+			ule.unlock();
 			events_cv_.notify_one();
 		}
 	}
