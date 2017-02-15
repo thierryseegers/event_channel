@@ -89,6 +89,20 @@ bool const drop_events = !keep_events;  //!< When stopped, drop unprocessed and 
 
 }
 
+//! Helper function to \ref apply.
+template<class F, class Tuple, std::size_t... I>
+constexpr decltype(auto) apply(F&& f, Tuple&& t, std::index_sequence<I...>)
+{
+	return std::invoke(std::forward<F>(f), std::get<I>(std::forward<Tuple>(t))...);
+}
+
+//! Convenience function to invoke a \c Callable with arguments packaged in a \c std::tuple<>.
+template <class F, class Tuple>
+constexpr decltype(auto) apply(F&& f, Tuple&& t)
+{
+	return apply(std::forward<F>(f), std::forward<Tuple>(t), std::make_index_sequence<std::tuple_size<std::decay_t<Tuple>>::value>{});
+}
+
 //! The event channel. Handles subscriptions and message dispatching.
 //!
 //! \tparam DispatchPolicy How to dispatch events. A type from \ref dispatch_policy.
@@ -106,19 +120,6 @@ class channel
 	static auto tuple_type_index()
 	{
 		return std::type_index(typeid(make_tuple_type_t<Args...>));
-	}
-
-	template<class F, class Tuple, std::size_t... I>
-	static constexpr decltype(auto) apply(F&& f, Tuple&& t, std::index_sequence<I...>)
-	{
-		return std::invoke(std::forward<F>(f), std::get<I>(std::forward<Tuple>(t))...);
-	}
-
-	// Convenience function to invoke a \c Callable with arguments packaged in a \c std::tuple<>.
-	template <class F, class Tuple>
-	static constexpr decltype(auto) apply(F&& f, Tuple&& t)
-	{
-		return apply(std::forward<F>(f), std::forward<Tuple>(t), std::make_index_sequence<std::tuple_size<std::decay_t<Tuple>>::value>{});
 	}
 
 	// Convenience function to map a function to a \ref handler_tag_t.
