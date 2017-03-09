@@ -1,5 +1,6 @@
 #pragma once
 
+#include <any>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
@@ -27,12 +28,12 @@ namespace detail
 
 typedef std::type_index event_tag_t;	//!< Type of the tag of an event's type.
 
-typedef std::function<const void* ()> wrapped_event_t;					//!< Type of functor that hides an event's type.
+typedef std::any const wrapped_event_t;									//!< Type of functor that hides an event's type.
 typedef std::pair<event_tag_t, wrapped_event_t> tagged_wrapped_event_t;	//!< Type of the association of an event's type tag, and it's associated wrapper functor.
 typedef std::vector<tagged_wrapped_event_t> tagged_wrapped_events_t;	//!< Type of a set of events.
 
-typedef std::map<handler_tag_t, std::function<void (const void*)>> tagged_handlers_t;	//!< Type of handlers key'ed by their tags.
-typedef std::map<event_tag_t, tagged_handlers_t> dispatcher_t;							//!< Type of tagged handlers key'ed by event types.
+typedef std::map<handler_tag_t, std::function<void (wrapped_event_t)>> tagged_handlers_t;	//!< Type of handlers key'ed by their tags.
+typedef std::map<event_tag_t, tagged_handlers_t> dispatcher_t;								//!< Type of tagged handlers key'ed by event types.
 
 }
 
@@ -51,7 +52,7 @@ struct sequential
 		{
 			for(auto const& d : dispatcher.at(e.first))
 			{
-				d.second(e.second());
+				d.second(e.second);
 			}
 		}
 	}
@@ -70,7 +71,7 @@ struct parallel
 
 			for(auto const& d : dispatcher.at(e.first))
 			{
-				waiters.push_back(std::async([&](){ d.second(e.second()); }));
+				waiters.push_back(std::async([&](){ d.second(e.second); }));
 			}
 
 			for(auto& w : waiters)
@@ -109,19 +110,6 @@ class channel
 	static auto tuple_type_index()
 	{
 		return std::type_index(typeid(make_tuple_type_t<Args...>));
-	}
-
-	template<class F, class Tuple, std::size_t... I>
-	static constexpr decltype(auto) apply(F&& f, Tuple&& t, std::index_sequence<I...>)
-	{
-		return std::invoke(std::forward<F>(f), std::get<I>(std::forward<Tuple>(t))...);
-	}
-
-	// Convenience function to invoke a \c Callable with arguments packaged in a \c std::tuple<>.
-	template <class F, class Tuple>
-	static constexpr decltype(auto) apply(F&& f, Tuple&& t)
-	{
-		return apply(std::forward<F>(f), std::forward<Tuple>(t), std::make_index_sequence<std::tuple_size_v<std::decay_t<Tuple>>>{});
 	}
 
 	// Convenience function to map a function to a \ref handler_tag_t.
@@ -249,9 +237,9 @@ public:
 		std::lock_guard<std::mutex> lg(dispatcher_pending_m_);
 		
 		dispatcher_pending_[tuple_type_index<Args...>()][make_tag(f)] =
-			[f](const void* params)
+			[f](detail::wrapped_event_t params)
 			{
-				apply(f, *static_cast<const make_tuple_type_t<Args...>*>(params));
+				std::apply(f, std::any_cast<make_tuple_type_t<Args...>>(params));
 			};
 	}
 
@@ -262,9 +250,9 @@ public:
 		std::lock_guard<std::mutex> lg(dispatcher_pending_m_);
 		
 		dispatcher_pending_[tuple_type_index<Args...>()][make_tag(p, f)] =
-			[p, f](const void* params)
+			[p, f](detail::wrapped_event_t params)
 			{
-				apply(f, std::tuple_cat(std::make_tuple(p), *static_cast<const make_tuple_type_t<Args...>*>(params)));
+				std::apply(f, std::tuple_cat(std::make_tuple(p), std::any_cast<make_tuple_type_t<Args...>>(params)));
 			};
 	}
 
@@ -277,11 +265,11 @@ public:
 		std::lock_guard<std::mutex> lg(dispatcher_pending_m_);
 		
 		dispatcher_pending_[tuple_type_index<Args...>()][make_tag(p.get(), f)] =
-			[w = std::weak_ptr<T>(p), f](const void* params)
+			[w = std::weak_ptr<T>(p), f](detail::wrapped_event_t params)
 			{
 				if(auto const p = w.lock())
 				{
-					apply(f, std::tuple_cat(std::make_tuple(p), *static_cast<const make_tuple_type_t<Args...>*>(params)));
+					std::apply(f, std::tuple_cat(std::make_tuple(p), std::any_cast<make_tuple_type_t<Args...>>(params)));
 				}
 			};
 	}
@@ -290,14 +278,14 @@ public:
 	//!
 	//!\return A tag to use with its \c unsubcribe counterpart.
 	template<typename F, typename... Args>
-	handler_tag_t subscribe(F f)
+	handler_tag_t subscribe(F f/*, typename std::enable_if<std::is_callable<F(Args...)>, void **>::type = nullptr*/)
 	{
 		std::lock_guard<std::mutex> lg(dispatcher_pending_m_);
 		
 		dispatcher_pending_[tuple_type_index<Args...>()][generic_handler_tagger_] =
-			[f](const void* params)
+			[f](detail::wrapped_event_t params)
 			{
-				apply(f, *static_cast<const make_tuple_type_t<Args...>*>(params));
+				std::apply(f, std::any_cast<make_tuple_type_t<Args...>>(params));
 			};
 		
 		return generic_handler_tagger_++;
@@ -388,7 +376,7 @@ public:
 		
 		if(processing_ || IdlePolicy == idle_policy::keep_events)
 		{
-			events_.push_back(std::make_pair(tuple_type_index<Args...>(), [e = std::make_tuple(std::forward<Args>(args)...)]{ return &e; }));
+			events_.push_back(std::make_pair(tuple_type_index<Args...>(), std::make_any<make_tuple_type_t<Args...>>(std::make_tuple(std::forward<Args>(args)...))));
 			events_cv_.notify_one();
 		}
 	}
