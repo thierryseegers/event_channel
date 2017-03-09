@@ -20,17 +20,46 @@
 namespace event_channel
 {
 
-typedef uintptr_t handler_tag_t;	//!< Tag returned when subscribing callable.
+using handler_tag_t = uintptr_t;	//!< Tag returned when subscribing callable.
 
 //! Private namespace, not to be used by end-users.
 namespace detail
 {
 
-typedef std::any wrapped_event_t;								//!< Type of an event.
-typedef std::vector<wrapped_event_t> tagged_wrapped_events_t;	//!< Type of a collection of events.
+using event_t = std::any;					//!< Event will be a std::any containing a std::tuple of parameters.
+using event_type_index_t = std::type_index;	//!< Type by which to index an event.
+using events_t = std::vector<event_t>;		//!< Type of a collection of events.
 
-typedef std::map<handler_tag_t, std::function<void (wrapped_event_t)>> tagged_handlers_t;	//!< Type of handlers key'ed by their tags.
-typedef std::map<std::type_index, tagged_handlers_t> dispatchers_t;							//!< Type of tagged handlers key'ed by event types.
+//! Convenience type alias.
+//!
+//! Since the type returned by std::make_tuple<Args...> may not be exactly std::tuple<Args...>,
+// we use this type alias to ensure we're using the same type everywhere.
+template<typename... Args>
+using make_tuple_type_t = typename std::result_of<decltype(&std::make_tuple<Args...>)(Args...)>::type;
+
+//! Convenience function to create an event out of parameters.
+template<class... Args>
+static event_t make_event(Args&&... args)
+{
+	return std::make_any<make_tuple_type_t<Args...>>(std::make_tuple(std::forward<Args>(args)...));
+}
+
+//! Convenience function to get a type_index out of a \ref tuple_type_t<Args...>.
+template<typename... Args>
+static event_type_index_t event_type_index()
+{
+	return typeid(make_tuple_type_t<Args...>);
+}
+
+//! Convenience function to cast an event to it's underlying type of std::tuple.
+template<class... Args>
+static make_tuple_type_t<Args...> event_cast(event_t const& event)
+{
+	return std::any_cast<detail::make_tuple_type_t<Args...>>(event);
+}
+
+using tagged_handlers_t = std::map<handler_tag_t, std::function<void (event_t)>>;	//!< Type of handlers key'ed by their tags.
+using dispatchers_t = std::map<event_type_index_t, tagged_handlers_t>;				//!< Type of tagged handlers key'ed by event types.
 
 }
 
@@ -43,7 +72,7 @@ namespace dispatch_policy
 struct sequential
 {
 	//! Dispatching function.
-	static void dispatch(detail::tagged_wrapped_events_t const& events, detail::dispatchers_t const& dispatchers)
+	static void dispatch(detail::events_t const& events, detail::dispatchers_t const& dispatchers)
 	{
 		for(auto const& event : events)
 		{
@@ -60,7 +89,7 @@ struct sequential
 struct parallel
 {
 	//! Dispatching function.
-	static void dispatch(detail::tagged_wrapped_events_t const& events, detail::dispatchers_t const& dispatchers)
+	static void dispatch(detail::events_t const& events, detail::dispatchers_t const& dispatchers)
 	{
 		for(auto const& event : events)
 		{
@@ -97,26 +126,14 @@ bool const drop_events = !keep_events;  //!< When stopped, drop unprocessed and 
 template<class DispatchPolicy = dispatch_policy::sequential, bool IdlePolicy = idle_policy::keep_events>
 class channel
 {
-	// Since the type returned by std::make_tuple<Args...> may not be exactly std::tuple<Args...>,
-	// we use this type alias to ensure we're using the same type everywhere.
-	template<typename... Args>
-	using make_tuple_type_t = typename std::result_of<decltype(&std::make_tuple<Args...>)(Args...)>::type;
-
-	// Convenience function to get a type_index out of a \ref tuple_type_t<Args...>.
-	template<typename... Args>
-	static std::type_index event_type_index()
-	{
-		return typeid(make_tuple_type_t<Args...>);
-	}
-	
-	// Convenience function to map a function to a \ref handler_tag_t.
+	//! Convenience function to map a function to a \ref handler_tag_t.
 	template<typename R, typename... Args>
 	handler_tag_t make_tag(R (*f)(Args...))
 	{
 		return reinterpret_cast<handler_tag_t>(f);
 	}
 
-	// Convenience function to map a member function to a \ref handler_tag_t.
+	//! Convenience function to map a member function to a \ref handler_tag_t.
 	template<typename T, typename R, typename... Args>
 	handler_tag_t make_tag(T* p, R (T::*f)(Args...))
 	{
@@ -131,7 +148,7 @@ class channel
 	
 	unsigned long generic_handler_tagger_;      //!< The counter-style tag for \c Callable that can't be tracked otherwise.
 
-	detail::tagged_wrapped_events_t events_;    //!< Holds unprocessed events.
+	detail::events_t events_;    //!< Holds unprocessed events.
 	
 	detail::dispatchers_t	dispatchers_pending_,   //!< Buffers subscribers.
 							dispatchers_;           //!< Holds subscribers.
@@ -166,7 +183,7 @@ public:
 			{
 				while(processing_)
 				{
-					detail::tagged_wrapped_events_t events;
+					detail::events_t events;
 					
 					// Wait until we are told to stop processing events or until we have events to process.
 					{
@@ -233,10 +250,10 @@ public:
 	{
 		std::lock_guard<std::mutex> lg(dispatchers_pending_m_);
 		
-		dispatchers_pending_[event_type_index<Args...>()][make_tag(f)] =
-			[f](detail::wrapped_event_t params)
+		dispatchers_pending_[detail::event_type_index<Args...>()][make_tag(f)] =
+			[f](detail::event_t event)
 			{
-				std::apply(f, std::any_cast<make_tuple_type_t<Args...>>(params));
+				std::apply(f, detail::event_cast<Args...>(event));
 			};
 	}
 
@@ -246,10 +263,10 @@ public:
 	{
 		std::lock_guard<std::mutex> lg(dispatchers_pending_m_);
 		
-		dispatchers_pending_[event_type_index<Args...>()][make_tag(p, f)] =
-			[p, f](detail::wrapped_event_t params)
+		dispatchers_pending_[detail::event_type_index<Args...>()][make_tag(p, f)] =
+			[p, f](detail::event_t event)
 			{
-				std::apply(f, std::tuple_cat(std::make_tuple(p), std::any_cast<make_tuple_type_t<Args...>>(params)));
+				std::apply(f, std::tuple_cat(std::tie(p), detail::event_cast<Args...>(event)));
 			};
 	}
 
@@ -261,12 +278,12 @@ public:
 	{
 		std::lock_guard<std::mutex> lg(dispatchers_pending_m_);
 		
-		dispatchers_pending_[event_type_index<Args...>()][make_tag(p.get(), f)] =
-			[w = std::weak_ptr<T>(p), f](detail::wrapped_event_t params)
+		dispatchers_pending_[detail::event_type_index<Args...>()][make_tag(p.get(), f)] =
+			[w = std::weak_ptr<T>(p), f](detail::event_t event)
 			{
 				if(auto const p = w.lock())
 				{
-					std::apply(f, std::tuple_cat(std::make_tuple(p), std::any_cast<make_tuple_type_t<Args...>>(params)));
+					std::apply(f, std::tuple_cat(std::tie(p), detail::event_cast<Args...>(event)));
 				}
 			};
 	}
@@ -279,10 +296,10 @@ public:
 	{
 		std::lock_guard<std::mutex> lg(dispatchers_pending_m_);
 		
-		dispatchers_pending_[event_type_index<Args...>()][generic_handler_tagger_] =
-			[f](detail::wrapped_event_t params)
+		dispatchers_pending_[detail::event_type_index<Args...>()][generic_handler_tagger_] =
+			[f](detail::event_t event)
 			{
-				std::apply(f, std::any_cast<make_tuple_type_t<Args...>>(params));
+				std::apply(f, detail::event_cast<Args...>(event));
 			};
 		
 		return generic_handler_tagger_++;
@@ -296,7 +313,7 @@ public:
 		std::unique_lock<std::mutex> lgdp(dispatchers_pending_m_, std::defer_lock);
 		std::lock(lgd, lgdp);
 
-		auto const t = event_type_index<Args...>();
+		auto const t = detail::event_type_index<Args...>();
 		detail::dispatchers_t::iterator i;
 		if((i = dispatchers_.find(t)) != dispatchers_.end())
 		{
@@ -316,7 +333,7 @@ public:
 		std::unique_lock<std::mutex> lgdp(dispatchers_pending_m_, std::defer_lock);
 		std::lock(lgd, lgdp);
 
-		auto const t = event_type_index<Args...>();
+		auto const t = detail::event_type_index<Args...>();
 		detail::dispatchers_t::iterator i;
 		if((i = dispatchers_.find(t)) != dispatchers_.end())
 		{
@@ -336,7 +353,7 @@ public:
 		std::unique_lock<std::mutex> lgdp(dispatchers_pending_m_, std::defer_lock);
 		std::lock(lgd, lgdp);
 
-		auto const t = event_type_index<Args...>();
+		auto const t = detail::event_type_index<Args...>();
 		detail::dispatchers_t::iterator i;
 		if((i = dispatchers_.find(t)) != dispatchers_.end())
 		{
@@ -373,7 +390,7 @@ public:
 		
 		if(processing_ || IdlePolicy == idle_policy::keep_events)
 		{
-			events_.push_back(std::make_any<make_tuple_type_t<Args...>>(std::make_tuple(std::forward<Args>(args)...)));
+			events_.push_back(detail::make_event(args...));
 			events_cv_.notify_one();
 		}
 	}
