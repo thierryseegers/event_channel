@@ -17,6 +17,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
 	target_compile_options(correctness
 		PUBLIC /std:c++latest
+		PUBLIC /EHsc
 	)
 endif()
 
