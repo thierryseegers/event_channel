@@ -33,7 +33,7 @@ using events_t = std::vector<event_t>;		//!< Type of a collection of events.
 //! Convenience type alias.
 //!
 //! Since the type returned by std::make_tuple<Args...> may not be exactly std::tuple<Args...>,
-// we use this type alias to ensure we're using the same type everywhere.
+//! we use this type alias to ensure we're using the same type everywhere.
 template<typename... Args>
 using make_tuple_type_t = typename std::result_of<decltype(&std::make_tuple<Args...>)(Args...)>::type;
 
@@ -58,8 +58,23 @@ static make_tuple_type_t<Args...> event_cast(event_t const& event)
 	return std::any_cast<detail::make_tuple_type_t<Args...>>(event);
 }
 
-using tagged_handlers_t = std::map<handler_tag_t, std::function<void (event_t)>>;	//!< Type of handlers key'ed by their tags.
-using dispatchers_t = std::map<event_type_index_t, tagged_handlers_t>;				//!< Type of tagged handlers key'ed by event types.
+using handler_t = std::function<void (event_t const&)>;					//!< Handlers are converted to this type.
+using tagged_handlers_t = std::map<handler_tag_t, handler_t>;			//!< Type of handlers key'ed by their tags.
+using dispatchers_t = std::map<event_type_index_t, tagged_handlers_t>;	//!< Type of tagged handlers key'ed by event types.
+
+//! Convenience function to map a function to a \ref handler_tag_t.
+template<typename R, typename... Args>
+handler_tag_t make_tag(R(*f)(Args...))
+{
+	return reinterpret_cast<handler_tag_t>(f);
+}
+
+//! Convenience function to map a member function to a \ref handler_tag_t.
+template<typename T, typename R, typename... Args>
+handler_tag_t make_tag(T* p, R(T::*f)(Args...))
+{
+	return reinterpret_cast<handler_tag_t>(p) + typeid(f).hash_code() * 37;
+}
 
 }
 
@@ -126,20 +141,6 @@ bool const drop_events = !keep_events;  //!< When stopped, drop unprocessed and 
 template<class DispatchPolicy = dispatch_policy::sequential, bool IdlePolicy = idle_policy::keep_events>
 class channel
 {
-	//! Convenience function to map a function to a \ref handler_tag_t.
-	template<typename R, typename... Args>
-	handler_tag_t make_tag(R (*f)(Args...))
-	{
-		return reinterpret_cast<handler_tag_t>(f);
-	}
-
-	//! Convenience function to map a member function to a \ref handler_tag_t.
-	template<typename T, typename R, typename... Args>
-	handler_tag_t make_tag(T* p, R (T::*f)(Args...))
-	{
-		return reinterpret_cast<handler_tag_t>(p) + typeid(f).hash_code() * 37;
-	}
-
 	std::mutex dispatchers_m_, dispatchers_pending_m_, events_m_;
 	std::condition_variable events_cv_;
 	std::thread run_t_;
@@ -250,8 +251,8 @@ public:
 	{
 		std::lock_guard<std::mutex> lg(dispatchers_pending_m_);
 		
-		dispatchers_pending_[detail::event_type_index<Args...>()][make_tag(f)] =
-			[f](detail::event_t event)
+		dispatchers_pending_[detail::event_type_index<Args...>()][detail::make_tag(f)] =
+			[f](detail::event_t const& event)
 			{
 				std::apply(f, detail::event_cast<Args...>(event));
 			};
@@ -263,8 +264,8 @@ public:
 	{
 		std::lock_guard<std::mutex> lg(dispatchers_pending_m_);
 		
-		dispatchers_pending_[detail::event_type_index<Args...>()][make_tag(p, f)] =
-			[p, f](detail::event_t event)
+		dispatchers_pending_[detail::event_type_index<Args...>()][detail::make_tag(p, f)] =
+			[p, f](detail::event_t const& event)
 			{
 				std::apply(f, std::tuple_cat(std::tie(p), detail::event_cast<Args...>(event)));
 			};
@@ -278,8 +279,8 @@ public:
 	{
 		std::lock_guard<std::mutex> lg(dispatchers_pending_m_);
 		
-		dispatchers_pending_[detail::event_type_index<Args...>()][make_tag(p.get(), f)] =
-			[w = std::weak_ptr<T>(p), f](detail::event_t event)
+		dispatchers_pending_[detail::event_type_index<Args...>()][detail::make_tag(p.get(), f)] =
+			[w = std::weak_ptr<T>(p), f](detail::event_t const& event)
 			{
 				if(auto const p = w.lock())
 				{
@@ -297,7 +298,7 @@ public:
 		std::lock_guard<std::mutex> lg(dispatchers_pending_m_);
 		
 		dispatchers_pending_[detail::event_type_index<Args...>()][generic_handler_tagger_] =
-			[f](detail::event_t event)
+			[f](detail::event_t const& event)
 			{
 				std::apply(f, detail::event_cast<Args...>(event));
 			};
@@ -317,11 +318,11 @@ public:
 		detail::dispatchers_t::iterator i;
 		if((i = dispatchers_.find(t)) != dispatchers_.end())
 		{
-			i->second.erase(make_tag(f));
+			i->second.erase(detail::make_tag(f));
 		}
 		else if((i = dispatchers_pending_.find(t)) != dispatchers_pending_.end())
 		{
-			i->second.erase(make_tag(f));
+			i->second.erase(detail::make_tag(f));
 		}
 	};
 
@@ -337,11 +338,11 @@ public:
 		detail::dispatchers_t::iterator i;
 		if((i = dispatchers_.find(t)) != dispatchers_.end())
 		{
-			i->second.erase(make_tag(p, f));
+			i->second.erase(detail::make_tag(p, f));
 		}
 		else if((i = dispatchers_pending_.find(t)) != dispatchers_pending_.end())
 		{
-			i->second.erase(make_tag(p, f));
+			i->second.erase(detail::make_tag(p, f));
 		}
 	};
 
@@ -357,11 +358,11 @@ public:
 		detail::dispatchers_t::iterator i;
 		if((i = dispatchers_.find(t)) != dispatchers_.end())
 		{
-			i->second.erase(make_tag(p.get(), f));
+			i->second.erase(detail::make_tag(p.get(), f));
 		}
 		else if((i = dispatchers_pending_.find(t)) != dispatchers_pending_.end())
 		{
-			i->second.erase(make_tag(p.get(), f));
+			i->second.erase(detail::make_tag(p.get(), f));
 		}
 	};
 
