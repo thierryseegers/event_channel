@@ -2,11 +2,6 @@ find_package(Threads REQUIRED)
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
-if(MSVC)
-	add_definitions(/D _CRT_SECURE_NO_WARNINGS)
-	add_definitions(/D _SCL_SECURE_NO_WARNINGS)
-endif()
-
 add_executable(correctness catch.hpp semaphore.hpp correctness.cpp)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR
