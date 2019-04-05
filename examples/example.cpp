@@ -1,7 +1,12 @@
 #include "event_channel.h"
 
+#include <boost/asio/io_service.hpp>
+#include <boost/thread/thread.hpp>
+
 #include <chrono>
+#include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <string>
 #include <thread>
@@ -30,11 +35,48 @@ public:
 	}
 };
 
-#include <map>
+class thread_pooled
+{
+	unique_ptr<boost::asio::io_service> io_service = make_unique<boost::asio::io_service>();
+	unique_ptr<boost::asio::io_service::work> work = make_unique<boost::asio::io_service::work>(*io_service);
+	vector<thread> threads;
+
+public:
+	thread_pooled(size_t const n_threads) : threads{n_threads}
+	{
+		for(auto& t : threads)
+		{
+			t = thread([&] { io_service->run(); });
+		}
+	}
+
+	thread_pooled(thread_pooled&& rhs) = default;
+
+	~thread_pooled()
+	{
+		work.reset();
+
+		for_each(threads.begin(), threads.end(), [](thread& t)
+				 {
+					 t.join();
+				 });
+	}
+
+	void operator()(event_channel::events_t const& events, event_channel::dispatchers_t const& dispatchers)
+	{
+		for(auto const& event : events)
+		{
+			for(auto const& dispatcher : dispatchers.at(event.type()))
+			{
+				io_service->post(boost::bind(dispatcher.second, event));
+			}
+		}
+	}
+};
 
 int main()
 {
-	event_channel::channel<> ec;
+	event_channel::channel<thread_pooled> ec{thread_pooled{4}};
 
     // Subscribe a global function.
 	ec.subscribe(print_t<int>);
@@ -90,7 +132,6 @@ int main()
     ec.send(string("Touch your tail!"));
     this_thread::sleep_for(chrono::seconds(1));
 
-    
     // We're done.
     // Everything will be cleaned-up automatically.
 	return 0;

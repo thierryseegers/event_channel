@@ -28,7 +28,6 @@ namespace detail
 
 using event_t = std::any;					//!< Event will be a std::any containing a std::tuple of parameters.
 using event_type_index_t = std::type_index;	//!< Type by which to index an event.
-using events_t = std::vector<event_t>;		//!< Type of a collection of events.
 
 //! Convenience type alias.
 //!
@@ -60,7 +59,6 @@ static make_tuple_type_t<Args...> event_cast(event_t const& event)
 
 using handler_t = std::function<void (event_t const&)>;					//!< Handlers are converted to this type.
 using tagged_handlers_t = std::map<handler_tag_t, handler_t>;			//!< Type of handlers key'ed by their tags.
-using dispatchers_t = std::map<event_type_index_t, tagged_handlers_t>;	//!< Type of tagged handlers key'ed by event types.
 
 //! Convenience function to map a function to a \ref handler_tag_t.
 template<typename R, typename... Args>
@@ -78,6 +76,9 @@ handler_tag_t make_tag(T* p, R(T::*f)(Args...))
 
 }
 
+using events_t = std::vector<detail::event_t>;	//!< Type of a collection of events.
+using dispatchers_t = std::map<detail::event_type_index_t, detail::tagged_handlers_t>;	//!< Type of tagged handlers key'ed by event types.
+
 //! Set of event dispatching policies to use with \ref event_channel::channel.
 namespace dispatch_policy
 {
@@ -87,7 +88,7 @@ namespace dispatch_policy
 struct sequential
 {
 	//! Dispatching function.
-	static void dispatch(detail::events_t const& events, detail::dispatchers_t const& dispatchers)
+	void operator()(events_t const& events, dispatchers_t const& dispatchers)
 	{
 		for(auto const& event : events)
 		{
@@ -104,7 +105,7 @@ struct sequential
 struct parallel
 {
 	//! Dispatching function.
-	static void dispatch(detail::events_t const& events, detail::dispatchers_t const& dispatchers)
+	void operator()(events_t const& events, dispatchers_t const& dispatchers)
 	{
 		for(auto const& event : events)
 		{
@@ -145,20 +146,30 @@ class channel
 	std::condition_variable events_cv_;
 	std::thread run_t_;
 
-	bool processing_;                           //!< Whether we are processing incoming events or not.
+	bool processing_;	//!< Whether we are processing incoming events or not.
 	
-	unsigned long generic_handler_tagger_;      //!< The counter-style tag for \c Callable that can't be tracked otherwise.
+	unsigned long generic_handler_tagger_;	//!< The counter-style tag for \c Callable that can't be tracked otherwise.
 
-	detail::events_t events_;    //!< Holds unprocessed events.
+	events_t events_;    //!< Holds unprocessed events.
 	
-	detail::dispatchers_t	dispatchers_pending_,   //!< Buffers subscribers.
-							dispatchers_;           //!< Holds subscribers.
+	dispatchers_t	dispatchers_pending_,	//!< Buffers subscribers.
+					dispatchers_;           //!< Holds subscribers.
+
+	DispatchPolicy dispatch_policy_;	//!< Instance of dispatching policy.
 
 public:
-	channel() : processing_(false), generic_handler_tagger_(0)
+	//! Constructor with non-default DispatchPolicy.
+	channel(DispatchPolicy&& dispatch_policy)
+		: processing_(false)
+		, generic_handler_tagger_(0)
+		, dispatch_policy_(std::move(dispatch_policy))
 	{
 		start();
 	}
+
+	//! Default constructor.
+	channel() : channel(DispatchPolicy{})
+	{}
 
 	virtual ~channel()
 	{
@@ -183,7 +194,7 @@ public:
 			{
 				while(processing_)
 				{
-					detail::events_t events;
+					events_t events;
 					
 					// Wait until we are told to stop processing events or until we have events to process.
 					{
@@ -205,7 +216,7 @@ public:
 					// This allows users to add more subscribers while we process events.
 					// If we didn't do that, subscribing would block while events are processed since \ref dispatcher_ must remain intact while that happens.
 					// Mind you, as it is now, unsubscribing will still block while events are processed. To avoid this, we would need the equivalent of dispatcher_pending_ for removal.
-					std::unique_lock<std::mutex> uld(dispatcher_m_, std::defer_lock);
+					std::unique_lock<std::mutex> uld(dispatchers_m_, std::defer_lock);
 					{
 						std::unique_lock<std::mutex> uldp(dispatchers_pending_m_, std::defer_lock);
 						std::lock(uld, uldp);
@@ -218,7 +229,7 @@ public:
 					}
 					
 					// Process events using given DispatchPolicy.
-					DispatchPolicy::dispatch(events, dispatchers_);
+					dispatch_policy_(events, dispatchers_);
 				}
 			});
 	}
@@ -314,7 +325,7 @@ public:
 		std::lock(uld, uldp);
 
 		auto const t = detail::event_type_index<Args...>();
-		detail::dispatchers_t::iterator i;
+		dispatchers_t::iterator i;
 		if((i = dispatchers_.find(t)) != dispatchers_.end())
 		{
 			i->second.erase(detail::make_tag(f));
@@ -334,7 +345,7 @@ public:
 		std::lock(uld, uldp);
 
 		auto const t = detail::event_type_index<Args...>();
-		detail::dispatchers_t::iterator i;
+		dispatchers_t::iterator i;
 		if((i = dispatchers_.find(t)) != dispatchers_.end())
 		{
 			i->second.erase(detail::make_tag(p, f));
@@ -354,7 +365,7 @@ public:
 		std::lock(uld, uldp);
 
 		auto const t = detail::event_type_index<Args...>();
-		detail::dispatchers_t::iterator i;
+		dispatchers_t::iterator i;
 		if((i = dispatchers_.find(t)) != dispatchers_.end())
 		{
 			i->second.erase(detail::make_tag(p.get(), f));

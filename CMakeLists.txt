@@ -6,6 +6,7 @@ set(VERSION_MAJOR 1)
 set(VERSION_MINOR 0)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+set(CMAKE_CXX_STANDARD 17)
 
 enable_testing()
 
