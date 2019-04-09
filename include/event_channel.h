@@ -134,6 +134,40 @@ bool const drop_events = !keep_events;  //!< When stopped, drop unprocessed and 
 
 }
 
+//! To return a token to the subscribed event handler when calling \ref channel::subscribe, pass a \ref use_token as the first parameter.
+struct use_token{};
+
+//! Destroy the \ref token associated with an event handler's subscription to unsubscribe it.
+class [[no_discard]] token
+{
+	template<class DispatchPolicy, bool IdlePolicy>
+	friend class channel;
+
+	std::function<void ()> f_ = []{};
+
+	token() {}
+	token(decltype(f_) f) : f_{f} {}
+
+public:
+	//! Convenience copy constructor.
+	token(token&& other)
+	{
+		std::swap(f_, other.f_);
+	}
+
+	//! Convenience assignment operator.
+	token& operator=(token&& other)
+	{
+		std::swap(f_, other.f_);
+		return *this;
+	}
+
+	~token()
+	{
+		f_();
+	}
+};
+
 //! The event channel. Handles subscriptions and message dispatching.
 //!
 //! \tparam DispatchPolicy How to dispatch events. A type from \ref dispatch_policy.
@@ -240,7 +274,7 @@ public:
 			});
 	}
 
-	//! \brief Stop dispatching events.
+	//!  Stop dispatching events.
     //!
 	//! Resume by calling \ref start.
     //! The value of \p IdlePolicy will dictate what to do with incoming events in the meantime.
@@ -287,7 +321,7 @@ public:
 			};
 	}
 
-	//!\brief Subscribe an object instance and a member function as an event handler.
+	//! Subscribe an object instance and a member function as an event handler.
 	//!
 	//! The \c weak_ptr<> is saved and invoked only if it can be locked.
 	template<typename T, typename R, typename... Args>
@@ -305,11 +339,11 @@ public:
 			};
 	}
 
-	//!\brief Subscribe a \c Callable as an event handler.
+	//! Subscribe a \c Callable as an event handler.
 	//!
 	//!\return A tag to use with its \c unsubcribe counterpart.
 	template<typename F, typename... Args>
-	handler_tag_t subscribe(F f/*, typename std::enable_if<std::is_callable<F(Args...)>, void **>::type = nullptr*/)
+	handler_tag_t subscribe(F f, typename std::enable_if<std::is_invocable_v<F, Args...>, void**>::type = nullptr)
 	{
 		std::lock_guard<std::mutex> lge(dispatchers_pending_m_);
 		
@@ -321,6 +355,34 @@ public:
 		
 		return generic_handler_tagger_++;
 	};
+
+	//! Suscribe a function or an object instance and a member function as an event handler.
+	//!
+	//!\return A \ref token to hold on to and destroy when the handler should be unsubscribed.
+	template<typename... Args>
+	token subscribe(use_token const&, Args&&... args)
+	{
+		subscribe(std::forward<Args>(args)...);
+		return {[=]
+			{
+				unsubscribe(std::forward<Args>(args)...);
+			}
+		};
+	}
+
+	//! Subscribe a \c Callable as an event handler.
+	//!
+	//!\return A \ref token to hold on to and destroy when the handler should be unsubscribed.
+	template<typename F, typename... Args>
+	token subscribe(use_token const&, F f, typename std::enable_if<std::is_invocable_v<F, Args...>, void**>::type = nullptr)
+	{
+		auto const& handler_tag = subscribe<F, Args...>(f);
+		return {[=]
+			{
+				unsubscribe(handler_tag);
+			}
+		};
+	}
 
 	//! Unsubscribe a previously subscribed function.
 	template<typename R, typename... Args>
