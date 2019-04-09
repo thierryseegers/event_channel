@@ -154,6 +154,23 @@ class channel
 	detail::dispatchers_t	dispatchers_pending_,   //!< Buffers subscribers.
 							dispatchers_;           //!< Holds subscribers.
 
+	void unsubscribe(detail::event_type_index_t const& index, handler_tag_t const& tag)
+	{
+		std::unique_lock<std::mutex> uld(dispatchers_m_, std::defer_lock);
+		std::unique_lock<std::mutex> uldp(dispatchers_pending_m_, std::defer_lock);
+		std::lock(uld, uldp);
+
+		detail::dispatchers_t::iterator i;
+		if((i = dispatchers_.find(index)) != dispatchers_.end())
+		{
+			i->second.erase(tag);
+		}
+		else if((i = dispatchers_pending_.find(index)) != dispatchers_pending_.end())
+		{
+			i->second.erase(tag);
+		}
+	}
+
 public:
 	channel() : processing_(false), generic_handler_tagger_(0)
 	{
@@ -309,60 +326,21 @@ public:
 	template<typename R, typename... Args>
 	void unsubscribe(R (*f)(Args...))
 	{
-		std::unique_lock<std::mutex> uld(dispatchers_m_, std::defer_lock);
-		std::unique_lock<std::mutex> uldp(dispatchers_pending_m_, std::defer_lock);
-		std::lock(uld, uldp);
-
-		auto const t = detail::event_type_index<Args...>();
-		detail::dispatchers_t::iterator i;
-		if((i = dispatchers_.find(t)) != dispatchers_.end())
-		{
-			i->second.erase(detail::make_tag(f));
-		}
-		else if((i = dispatchers_pending_.find(t)) != dispatchers_pending_.end())
-		{
-			i->second.erase(detail::make_tag(f));
-		}
-	};
+		unsubscribe(detail::event_type_index<Args...>(), detail::make_tag(f));
+	}
 
 	//! Unsubscribe a previously subscribed object instance and its member function.
 	template<typename T, typename R, typename... Args>
 	void unsubscribe(T* p, R (T::*f)(Args...))
 	{
-		std::unique_lock<std::mutex> uld(dispatchers_m_, std::defer_lock);
-		std::unique_lock<std::mutex> uldp(dispatchers_pending_m_, std::defer_lock);
-		std::lock(uld, uldp);
-
-		auto const t = detail::event_type_index<Args...>();
-		detail::dispatchers_t::iterator i;
-		if((i = dispatchers_.find(t)) != dispatchers_.end())
-		{
-			i->second.erase(detail::make_tag(p, f));
-		}
-		else if((i = dispatchers_pending_.find(t)) != dispatchers_pending_.end())
-		{
-			i->second.erase(detail::make_tag(p, f));
-		}
+		unsubscribe(detail::event_type_index<Args...>(), detail::make_tag(p, f));
 	};
 
 	//! Unsubscribe a previously subscribed object instance and its member function.
 	template<typename T, typename R, typename... Args>
 	void unsubscribe(std::shared_ptr<T> const& p, R (T::*f)(Args...))
 	{
-		std::unique_lock<std::mutex> uld(dispatchers_m_, std::defer_lock);
-		std::unique_lock<std::mutex> uldp(dispatchers_pending_m_, std::defer_lock);
-		std::lock(uld, uldp);
-
-		auto const t = detail::event_type_index<Args...>();
-		detail::dispatchers_t::iterator i;
-		if((i = dispatchers_.find(t)) != dispatchers_.end())
-		{
-			i->second.erase(detail::make_tag(p.get(), f));
-		}
-		else if((i = dispatchers_pending_.find(t)) != dispatchers_pending_.end())
-		{
-			i->second.erase(detail::make_tag(p.get(), f));
-		}
+		unsubscribe(detail::event_type_index<Args...>(), detail::make_tag(p.get(), f));
 	};
 
 	//! Unsubscribe a previously subscribed \c Callable.
